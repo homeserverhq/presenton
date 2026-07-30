@@ -115,7 +115,7 @@ async def verify_session(
     if principal is None or user is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
     original_uri = request.headers.get("x-original-uri")
-    if original_uri and not is_app_data_path_authorized(
+    if original_uri and original_uri.startswith("/app_data/") and not is_app_data_path_authorized(
         original_uri,
         user_id=principal.user_id,
         is_admin=principal.is_admin,
