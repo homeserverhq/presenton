@@ -88,23 +88,37 @@ async def edit_slide(
         )
 
     # Always assign a new unique id to the slide
-    slide.id = uuid.uuid4()
+    # This is to ensure that the nextjs can track slide updates
+    old_presentation = slide.presentation
+    old_index = slide.index
+    old_layout_group = slide.layout_group
+    old_ui = slide.ui
 
-    sql_session.add(slide)
-    slide.content = edited_slide_content
-    slide.layout = slide_layout.id
-    slide.speaker_note = edited_slide_content.get("__speaker_note__", "")
+    await sql_session.delete(slide)
+    await sql_session.flush()
+
+    new_slide = SlideModel(
+        id=uuid.uuid4(),
+        presentation=old_presentation,
+        index=old_index,
+        layout_group=old_layout_group,
+        layout=slide_layout.id,
+        content=edited_slide_content,
+        speaker_note=edited_slide_content.get("__speaker_note__", ""),
+        ui=old_ui,
+    )
+    sql_session.add(new_slide)
     sql_session.add_all(new_assets)
     await sql_session.commit()
 
     await MEM0_PRESENTATION_MEMORY_SERVICE.store_slide_edit(
         presentation_id=presentation.id,
-        slide_index=slide.index,
+        slide_index=old_index,
         edit_prompt=prompt,
         edited_slide_content=edited_slide_content,
     )
 
-    return slide
+    return new_slide
 
 
 @SLIDE_ROUTER.post("/edit-html", response_model=SlideModel)
@@ -139,17 +153,32 @@ async def edit_slide_html(
 
     # Always assign a new unique id to the slide
     # This is to ensure that the nextjs can track slide updates
-    slide.id = uuid.uuid4()
+    old_presentation = slide.presentation
+    old_index = slide.index
 
-    sql_session.add(slide)
-    slide.html_content = edited_slide_html
+    await sql_session.delete(slide)
+    await sql_session.flush()
+
+    new_slide = SlideModel(
+        id=uuid.uuid4(),
+        presentation=old_presentation,
+        index=old_index,
+        layout_group=slide.layout_group,
+        layout=slide.layout,
+        content=slide.content,
+        speaker_note=slide.speaker_note,
+        html_content=edited_slide_html,
+        ui=slide.ui,
+        properties=slide.properties,
+    )
+    sql_session.add(new_slide)
     await sql_session.commit()
 
     await MEM0_PRESENTATION_MEMORY_SERVICE.store_slide_edit(
         presentation_id=presentation.id,
-        slide_index=slide.index,
+        slide_index=old_index,
         edit_prompt=prompt,
         edited_slide_content=edited_slide_html,
     )
 
-    return slide
+    return new_slide

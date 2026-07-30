@@ -9,6 +9,7 @@ from sqlmodel import Boolean, Field, SQLModel
 from models.presentation_outline_model import PresentationOutlineModel
 from models.presentation_structure_model import PresentationStructureModel
 from models.presentation_layout import PresentationLayoutModel
+from templates.v2.schema import get_template_schema
 from utils.datetime_utils import get_current_utc_datetime
 from api.v1.auth.context import get_current_owner_id
 
@@ -108,12 +109,20 @@ class PresentationModel(SQLModel, table=True):
             return PresentationLayoutModel(**self.layout)
         if "layouts" in self.layout:
             data = dict(self.layout)
+            try:
+                template_schema = get_template_schema(self.layout)
+                schema_map = {
+                    s.get("layout_id"): (s.get("schema") or {})
+                    for s in template_schema.get("layouts", [])
+                }
+            except Exception:
+                schema_map = {}
             data["slides"] = [
                 {
                     "id": lt.get("id", f"slide_{i}"),
                     "name": lt.get("name", lt.get("description", f"Slide {i}")),
                     "description": lt.get("description", ""),
-                    "json_schema": {},
+                    "json_schema": schema_map.get(lt.get("id"), {}),
                 }
                 for i, lt in enumerate(self.layout.get("layouts", []))
             ]
