@@ -139,11 +139,15 @@ def _blank_presentation_slide_ui() -> dict[str, Any]:
 def _presentation_task_progress_data(
     created_slides: int,
     remaining_slides: int,
-) -> dict[str, int]:
-    return {
+    presentation_id: Optional[str] = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
         "created_slides": max(created_slides, 0),
         "remaining_slides": max(remaining_slides, 0),
     }
+    if presentation_id:
+        result["presentation_id"] = presentation_id
+    return result
 
 
 def _requested_slide_count(request: GeneratePresentationRequest) -> int:
@@ -2495,6 +2499,7 @@ async def _run_generate_presentation_task(
         async_status.data = _presentation_task_progress_data(
             created_slides=0,
             remaining_slides=_requested_slide_count(request),
+            presentation_id=str(presentation_id),
         )
         async_status.updated_at = datetime.now()
         sql_session.add(async_status)
@@ -2526,6 +2531,7 @@ async def generate_presentation_async(
             data=_presentation_task_progress_data(
                 created_slides=0,
                 remaining_slides=_requested_slide_count(request),
+                presentation_id=str(presentation_id),
             ),
         )
         sql_session.add(async_status)
