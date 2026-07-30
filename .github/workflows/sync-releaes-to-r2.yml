@@ -6,6 +6,7 @@ on:
 
 jobs:
   upload:
+    if: github.event.repository.fork != true
     runs-on: ubuntu-latest
     environment: sync_r2
 
