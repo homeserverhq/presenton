@@ -102,6 +102,22 @@ class PresentationModel(SQLModel, table=True):
         return PresentationOutlineModel(**self.outlines)
 
     def get_layout(self):
+        if not self.layout:
+            return None
+        if "slides" in self.layout:
+            return PresentationLayoutModel(**self.layout)
+        if "layouts" in self.layout:
+            data = dict(self.layout)
+            data["slides"] = [
+                {
+                    "id": lt.get("id", f"slide_{i}"),
+                    "name": lt.get("name", lt.get("description", f"Slide {i}")),
+                    "description": lt.get("description", ""),
+                    "json_schema": {},
+                }
+                for i, lt in enumerate(self.layout.get("layouts", []))
+            ]
+            return PresentationLayoutModel(**data)
         return PresentationLayoutModel(**self.layout)
 
     def set_layout(self, layout: PresentationLayoutModel):

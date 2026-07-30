@@ -41,6 +41,7 @@ from utils.get_env import (
     get_openrouter_model_env,
     get_together_model_env,
     get_vertex_model_env,
+    get_vision_model_env,
 )
 
 
@@ -186,6 +187,11 @@ def get_llm_client() -> OpenAI:
     if not get_openai_api_key_env():
         raise HTTPException(status_code=400, detail="OpenAI API Key is not set")
     return OpenAI()
+
+
+def get_vision_model() -> str:
+    """Model name for vision-capable LLM calls. Uses $VISION_MODEL if set, otherwise falls back to get_model()."""
+    return get_vision_model_env() or get_model()
 
 
 def get_large_model() -> str:

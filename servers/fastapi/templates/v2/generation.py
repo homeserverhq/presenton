@@ -38,7 +38,7 @@ from templates.v2.models.elements import ImageFit
 from templates.v2.tools import PREVIEW_SLIDE_TOOL_NAME, PreviewSlideTool
 from utils.asset_directory_utils import resolve_image_path_to_filesystem
 from utils.llm_config import get_llm_config
-from utils.llm_provider import get_model
+from utils.llm_provider import get_model, get_vision_model
 
 DEFAULT_VALIDATION_RETRIES = 5
 MAX_PARALLEL_SLIDE_LAYOUTS = 10
@@ -765,12 +765,34 @@ def generate_slide_layout(
     )
     llm_config = get_llm_config()
     client = get_client(config=llm_config)
-    model = get_model()
-    messages = [
+
+    # Step 1: Vision model — describe the slide image as text (no schema, no tools)
+    vision_model = get_vision_model()
+    vision_messages = [
+        SystemMessage(content="You are a slide layout analyzer. Describe the visual structure of this slide in 2-3 sentences, including layout, components, spacing, and alignment."),
+        UserMessage(content=[_slide_image_content(slide_image_url)]),
+    ]
+    vision_response = client.generate(
+        model=vision_model,
+        messages=vision_messages,
+        max_tokens=300,
+    )
+    image_description = ""
+    if hasattr(vision_response, "content"):
+        desc = vision_response.content
+        if isinstance(desc, str):
+            image_description = desc.strip()
+        elif isinstance(desc, list):
+            image_description = " ".join(str(p) for p in desc).strip()
+
+    # Step 2: Main model — generate structured SlideLayout from description + payload
+    main_model = get_model()
+    layout_messages = [
         SystemMessage(content=GENERATE_SLIDE_LAYOUT_SYSTEM_PROMPT),
         UserMessage(
             content=[
-                _slide_image_content(slide_image_url),
+                f"Slide image description: {image_description}" if image_description
+                else "No slide image available.",
                 json.dumps(payload, indent=2),
             ]
         ),
@@ -778,8 +800,8 @@ def generate_slide_layout(
     preview_tool = PreviewSlideTool(slide_index=slide_index, fonts=fonts)
     layout = _generate_preview_candidate(
         client=client,
-        model=model,
-        messages=messages,
+        model=main_model,
+        messages=layout_messages,
         label=f"slide {slide_index + 1}",
         preview_tool=preview_tool,
         validation_retries=DEFAULT_VALIDATION_RETRIES,

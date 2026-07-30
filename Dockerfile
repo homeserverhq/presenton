@@ -126,6 +126,7 @@ RUN find /usr/share/fonts -type f ! -iname 'Noto*' -delete \
 RUN mkdir -p /app/scripts /app/servers/fastapi /app/servers/nextjs
 RUN mkdir -p /app_data/exports /app_data/images /app_data/uploads /app_data/fonts /app_data/templates /app_data/pptx-to-html /app_data/pptx-to-json \
     && chmod -R a+rX /app_data
+COPY servers/fastapi/static/test_template.pptx /app_data/exports/test_template.pptx
 
 COPY --from=fastapi-builder /opt/venv /opt/venv
 COPY --from=fastapi-builder /app/servers/fastapi /app/servers/fastapi

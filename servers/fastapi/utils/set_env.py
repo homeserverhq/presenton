@@ -337,3 +337,7 @@ def set_openai_compat_image_api_key_env(value: str):
 
 def set_openai_compat_image_model_env(value: str):
     os.environ["OPENAI_COMPAT_IMAGE_MODEL"] = value
+
+
+def set_vision_model_env(value: str):
+    os.environ["VISION_MODEL"] = value
