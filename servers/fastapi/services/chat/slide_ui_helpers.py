@@ -6,9 +6,12 @@ import math
 import re
 from typing import Any
 
+from utils.latex_text import replace_text_runs, text_runs_to_tagged_text
+
 _PATH_SEGMENT_RE = re.compile(r"^(?P<key>components|elements|children)\[(?P<index>\d+)\]$")
 CONTENT_EDITABLE_ELEMENT_TYPES = {
     "text",
+    "math",
     "text-list",
     "table",
     "image",
@@ -1307,6 +1310,11 @@ def _element_content(element: dict[str, Any]) -> Any:
     element_type = element.get("type")
     if element_type == "text":
         return {"text": _runs_text(element.get("runs"))}
+    if element_type == "math":
+        return {
+            "latex": element.get("latex"),
+            "display_mode": element.get("display_mode", True),
+        }
     if element_type == "text-list":
         items = element.get("items") if isinstance(element.get("items"), list) else []
         return {"items": [_runs_text(item) for item in items]}
@@ -1460,9 +1468,7 @@ def _dicts(value: Any) -> list[dict[str, Any]]:
 
 
 def _runs_text(value: Any) -> str:
-    if not isinstance(value, list):
-        return ""
-    return "".join(str(run.get("text") or "") for run in value if isinstance(run, dict))
+    return text_runs_to_tagged_text(value)
 
 
 def _searchable_text(content: Any) -> str:
@@ -1761,7 +1767,7 @@ def _content_update_requested_for_type(
     vector: dict[str, Any] | None,
     infographic: dict[str, Any] | None,
 ) -> bool:
-    if element_type == "text":
+    if element_type in {"text", "math"}:
         return text is not None
     if element_type == "text-list":
         return items is not None
@@ -1814,10 +1820,11 @@ def _update_text_element(element: dict[str, Any], text: str) -> None:
         text=text,
         fallback_font=element.get("font"),
     )
-    # The Konva renderer reads the flattened top-level `text` in preference to
-    # `runs` (see rawTextContent in TemplateV2KonvaSlide.tsx), and the frontend
-    # inline editor always writes both. Keep them in sync so edits are visible.
-    element["text"] = text
+    if any(run.get("type") == "latex" for run in element["runs"]):
+        element.pop("text", None)
+    else:
+        # The Konva renderer reads flattened plain text in preference to runs.
+        element["text"] = text
 
 
 def _update_text_list_element(element: dict[str, Any], items: list[str]) -> None:
@@ -1974,7 +1981,7 @@ def _update_chart_element(
                 raise ValueError("Each chart series must match the category count.")
 
 
-TEXT_STYLE_ELEMENT_TYPES = {"text", "text-list", "table"}
+TEXT_STYLE_ELEMENT_TYPES = {"text", "math", "text-list", "table"}
 
 
 def _apply_element_style_patch(
@@ -1991,6 +1998,8 @@ def _apply_element_style_patch(
 
     if element_type == "text":
         _apply_font_patch_to_text_element(element, font_patch)
+    elif element_type == "math":
+        _merge_font_patch(element, font_patch)
     elif element_type == "text-list":
         _apply_font_patch_to_text_list_element(element, font_patch)
     elif element_type == "table":
@@ -2174,16 +2183,7 @@ def _replacement_runs(
     text: str,
     fallback_font: Any,
 ) -> list[dict[str, Any]]:
-    if isinstance(existing_runs, list) and existing_runs:
-        first = existing_runs[0]
-        if isinstance(first, dict):
-            run = copy.deepcopy(first)
-            run["text"] = text
-            return [run]
-    run: dict[str, Any] = {"text": text}
-    if isinstance(fallback_font, dict):
-        run["font"] = copy.deepcopy(fallback_font)
-    return [run]
+    return replace_text_runs(existing_runs, text, fallback_font)
 
 
 def _validate_text_length(

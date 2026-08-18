@@ -935,6 +935,65 @@ def test_update_slide_element_accepts_common_text_style_aliases():
     assert session.commit_count == 1
 
 
+def test_update_slide_element_parses_latex_tag_and_updates_style():
+    slide = _slide()
+    slide.ui["components"].append(
+        {
+            "id": "formula",
+            "description": "Editable equation.",
+            "elements": [
+                {
+                    "type": "text",
+                    "decorative": False,
+                    "name": "Formula",
+                    "min_length": 1,
+                    "max_length": 4000,
+                    "runs": [
+                        {
+                            "type": "latex",
+                            "latex": "E = mc^2",
+                            "display_mode": True,
+                        }
+                    ],
+                    "position": {"x": 0, "y": 0},
+                    "size": {"width": 600, "height": 120},
+                    "font": {"size": 36, "color": "#111827"},
+                    "alignment": {
+                        "horizontal": "center",
+                        "vertical": "middle",
+                    },
+                }
+            ],
+        }
+    )
+    tools, session = _tools(slide)
+
+    result = _call(
+        tools,
+        "updateElement",
+        {
+            "index": 0,
+            "elementPath": "components[2].elements[0]",
+            "text": r"<latex>\frac{x_i^2}{n}</latex>",
+            "fontSize": 42,
+            "fontColor": "#7C3AED",
+            "textAlign": "left",
+        },
+    )
+
+    element = slide.ui["components"][2]["elements"][0]
+    assert result["ok"] is True
+    assert element["runs"][0]["latex"] == r"\frac{x_i^2}{n}"
+    assert element["runs"][0]["display_mode"] is True
+    assert "text" not in element
+    assert element["font"] == {"size": 42.0, "color": "#7C3AED"}
+    assert element["alignment"] == {
+        "horizontal": "left",
+        "vertical": "middle",
+    }
+    assert session.commit_count == 1
+
+
 def test_update_slide_element_text_list_color_updates_item_runs():
     slide = _slide()
     tools, session = _tools(slide)

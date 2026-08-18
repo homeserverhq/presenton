@@ -1414,6 +1414,16 @@ function textRun(text: string, font?: Font | null): TextRun {
 function adaptTextRun(item: unknown): TextRun | null {
   const record = asRecord(item);
   if (!record) return null;
+  if (readString(record.type) === "latex") {
+    const latex = truncateString(readString(record.latex) ?? "", 4000);
+    if (!latex) return null;
+    return stripNullish({
+      type: "latex",
+      latex,
+      display_mode: readBoolean(record, "display_mode") ?? false,
+      font: adaptFont(readRecord(record, "font")),
+    }) as TextRun;
+  }
   const text = truncateString(readString(record.text) ?? "", 700);
   if (!text) return null;
   return textRun(text, adaptFont(readRecord(record, "font")));

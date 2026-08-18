@@ -148,10 +148,19 @@ export type ChartSeries = {
 
 export type DataLabelPosition = "base" | "mid" | "top" | "outside";
 
-export type TextRun = {
+export type PlainTextRun = {
   text: string;
   font?: Font | null;
 };
+
+export type LatexTextRun = {
+  type: "latex";
+  latex: string;
+  display_mode?: boolean | null;
+  font?: Font | null;
+};
+
+export type TextRun = PlainTextRun | LatexTextRun;
 
 export type TextListItem = TextRun[];
 

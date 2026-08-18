@@ -6,14 +6,92 @@ from templates.v2.models.elements import (
     Container,
     Image,
     Infographic,
+    LatexTextRun,
     ProgressBarInfographicData,
     Table,
+    TableCell,
     Text,
     TextList,
     Vector,
     VectorShape,
 )
 from templates.v2.models.layouts import RawSlideLayout
+
+
+def test_latex_run_is_supported_in_text_elements():
+    layout = RawSlideLayout.model_validate(
+        {
+            "id": "formula_slide",
+            "description": "Layout with an editable equation.",
+            "elements": [
+                {
+                    "type": "container",
+                    "child": {
+                        "type": "text",
+                        "decorative": False,
+                        "name": "formula",
+                        "runs": [
+                            {
+                                "type": "latex",
+                                "latex": r"\frac{x_i^2}{\sum_{j=1}^n y_j}",
+                                "display_mode": True,
+                            }
+                        ],
+                        "position": {"x": 20, "y": 40},
+                        "size": {"width": 640, "height": 120},
+                        "font": {"size": 42, "color": "#111827"},
+                        "alignment": {
+                            "horizontal": "center",
+                            "vertical": "middle",
+                        },
+                        "min_length": 1,
+                        "max_length": 4000,
+                    },
+                }
+            ],
+        }
+    )
+
+    formula = layout.elements[0].child
+    assert isinstance(formula, Text)
+    assert isinstance(formula.runs[0], LatexTextRun)
+    assert formula.runs[0].latex == r"\frac{x_i^2}{\sum_{j=1}^n y_j}"
+    assert formula.runs[0].display_mode is True
+    assert layout.model_dump(mode="json")["elements"][0]["child"]["type"] == "text"
+
+
+def test_latex_run_rejects_empty_or_oversized_latex():
+    with pytest.raises(ValidationError, match="latex"):
+        LatexTextRun.model_validate({"type": "latex", "latex": ""})
+    with pytest.raises(ValidationError, match="latex"):
+        LatexTextRun.model_validate({"type": "latex", "latex": "x" * 4001})
+
+
+def test_standalone_math_element_is_rejected():
+    with pytest.raises(ValidationError):
+        RawSlideLayout.model_validate(
+            {
+                "id": "legacy_math",
+                "description": "Standalone math is no longer supported.",
+                "elements": [
+                    {
+                        "type": "math",
+                        "decorative": False,
+                        "name": "formula",
+                        "latex": "E = mc^2",
+                    }
+                ],
+            }
+        )
+
+
+def test_table_cell_accepts_latex_runs():
+    cell = TableCell.model_validate(
+        {"runs": [{"type": "latex", "latex": r"\sqrt{x^2 + y^2}"}]}
+    )
+
+    assert isinstance(cell.runs[0], LatexTextRun)
+    assert cell.runs[0].display_mode is False
 
 
 def test_chart_accepts_legacy_boolean_data_labels():

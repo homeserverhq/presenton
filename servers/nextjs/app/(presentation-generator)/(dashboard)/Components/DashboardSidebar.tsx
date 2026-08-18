@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { LayoutDashboard, Star, Brain, Settings, HelpCircle } from "lucide-react";
+import { LayoutDashboard, Star, Brain, Settings, HelpCircle, UsersRound } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 
@@ -11,12 +11,14 @@ export const defaultNavItems = [
     { key: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
     { key: "templates" as const, label: "Standard", icon: Star },
     { key: "designs" as const, label: "Smart", icon: Brain },
+    { key: "community" as const, label: "Community", icon: UsersRound },
 
 
 
 ];
 export const BelongingNavItems = [
     { key: "settings" as const, label: "Settings", icon: Settings },
+    
 ]
 
 const DashboardSidebar = () => {
@@ -66,6 +68,16 @@ const DashboardSidebar = () => {
                                 <span className="text-[11px] text-slate-800">Templates</span>
                             </div>
                         </Link>
+                        <Link
+                            prefetch={false}
+                            href="/community"
+                            className="flex flex-col items-center gap-2 text-center transition-colors"
+                            aria-label="Community"
+                            title="Community"
+                        >
+                            <UsersRound className={`h-4 w-4 ${pathname === "/community" ? "text-[#5146E5]" : "text-slate-600"}`} />
+                            <span className="text-[11px] text-slate-800">Community</span>
+                        </Link>
                         {/* <Link
                             prefetch={false}
                             href={`/theme`}
@@ -86,6 +98,14 @@ const DashboardSidebar = () => {
             </div>
 
             <div className="border-t border-[#E1E1E5] pt-5 font-syne">
+                  <Link
+                    href="/settings"
+                    className="flex flex-col items-center gap-2 transition-colors"
+                >
+                    <Settings className="h-4 w-4" />
+                    <span className="text-[11px] text-slate-800">Settings</span>
+                </Link>
+                <div className="py-2"/>
                 <Link
                     href="https://docs.presenton.ai/help"
                     target="_blank"

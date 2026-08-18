@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useDispatch } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import {
   clearPresentationData,
   setPresentationData,
@@ -12,6 +12,7 @@ import { MixpanelEvent, trackEvent } from "@/utils/mixpanel";
 import { sanitizeAnalyticsError } from "@/utils/analytics";
 import { getApiUrl, normalizeBackendAssetUrls } from "@/utils/api";
 import { store } from "@/store/store";
+import type { RootState } from "@/store/store";
 import {
   isChatGptAuthRequiredMessage,
   requestChatGptReauth,
@@ -94,12 +95,22 @@ export const usePresentationStreaming = (
   stream: string | null,
   setLoading: (loading: boolean) => void,
   setError: (error: boolean) => void,
-  fetchUserSlides: () => void,
-  options: { preloadPresentationData?: boolean } = {}
+  fetchUserSlides: (options?: {
+    clearHistory?: boolean;
+  }) => void | Promise<unknown>,
+  options: {
+    preloadPresentationData?: boolean;
+    generationMode?: "standard" | "smart";
+  } = {}
 ) => {
   const dispatch = useDispatch();
   const previousSlidesLength = useRef(0);
   const preloadPresentationData = Boolean(options.preloadPresentationData);
+  const isSmartMode = options.generationMode === "smart";
+  const usePresentonSmartEndpoint = useSelector(
+    (state: RootState) =>
+      isSmartMode && state.userConfig.llm_config.LLM === "presenton"
+  );
 
   useEffect(() => {
     if (!stream) {
@@ -117,6 +128,7 @@ export const usePresentationStreaming = (
     let preloadRequest: Promise<void> | null = null;
     const streamStartedAt = Date.now();
     let streamIsTemplateV2 = preloadPresentationData;
+    let smartGenerationOutcomeTracked = false;
 
     const closeEventSource = () => {
       if (eventSource) {
@@ -136,6 +148,16 @@ export const usePresentationStreaming = (
       description: string,
       options: { showToast?: boolean } = {}
     ) => {
+      if (isSmartMode && !smartGenerationOutcomeTracked) {
+        smartGenerationOutcomeTracked = true;
+        trackEvent(MixpanelEvent.Smart_Mode_Generation_Failed, {
+          presentation_id: presentationId,
+          stage: "presentation_stream",
+          retry_count: retryCount,
+          duration_ms: Date.now() - streamStartedAt,
+          error_message: sanitizeAnalyticsError(description, "Stream failed"),
+        });
+      }
       if (streamIsTemplateV2) {
         trackEvent(MixpanelEvent.TemplateV2_Stream_Failed, {
           presentation_id: presentationId,
@@ -237,13 +259,34 @@ export const usePresentationStreaming = (
       });
     };
 
+    const trackSmartModeGenerationCompleted = (presentation: unknown) => {
+      if (!isSmartMode || smartGenerationOutcomeTracked) return;
+      smartGenerationOutcomeTracked = true;
+      const slides =
+        presentation &&
+        typeof presentation === "object" &&
+        Array.isArray((presentation as Record<string, unknown>).slides)
+          ? (presentation as Record<string, unknown>).slides
+          : store.getState().presentationGeneration.presentationData?.slides;
+      trackEvent(MixpanelEvent.Smart_Mode_Generation_Completed, {
+        presentation_id: presentationId,
+        slide_count: Array.isArray(slides) ? slides.length : 0,
+        retry_count: retryCount,
+        duration_ms: Date.now() - streamStartedAt,
+      });
+    };
+
     const openStream = () => {
       closeEventSource();
       eventSource = new EventSource(
-        getApiUrl(`/api/v1/ppt/presentation/stream/${presentationId}`)
+        getApiUrl(
+          usePresentonSmartEndpoint
+            ? `/api/v2/ppt/presentation/stream/${presentationId}`
+            : `/api/v1/ppt/presentation/stream/${presentationId}`
+        )
       );
 
-      eventSource.addEventListener("response", (event) => {
+      eventSource.addEventListener("response", async (event) => {
         let data: any;
         try {
           data = JSON.parse(event.data);
@@ -255,6 +298,53 @@ export const usePresentationStreaming = (
         }
 
         switch (data.type) {
+          case "fonts": {
+            if (data.fonts && typeof data.fonts === "object") {
+              const prev = store.getState().presentationGeneration.presentationData;
+              dispatch(
+                setPresentationData({
+                  ...(prev ?? {}),
+                  fonts: data.fonts,
+                  slides: prev?.slides ?? [],
+                } as PresentationData)
+              );
+            }
+            break;
+          }
+
+          case "slide_html": {
+            const slideIndex = Number(data.index);
+            const html = typeof data.html === "string" ? data.html : "";
+            if (!Number.isFinite(slideIndex) || !html) break;
+
+            const incomingSlide =
+              data.slide && typeof data.slide === "object"
+                ? data.slide
+                : {
+                    id: data.slide_id,
+                    index: slideIndex,
+                    layout: "smart-html",
+                    layout_group: "smart-html",
+                    content: { title: `Slide ${slideIndex + 1}` },
+                    html_content: html,
+                  };
+            const normalizedSlide = normalizeBackendAssetUrls(incomingSlide);
+            const prev = store.getState().presentationGeneration.presentationData;
+            const mergedSlides = mergeSingleSlidePreservingResolvedAssets(
+              prev?.slides,
+              normalizedSlide
+            );
+            dispatch(
+              setPresentationData({
+                ...(prev ?? {}),
+                slides: mergedSlides,
+              } as PresentationData)
+            );
+            previousSlidesLength.current = mergedSlides.length;
+            setLoading(false);
+            break;
+          }
+
           case "chunk":
             accumulatedChunks += data.chunk;
             const streamedSlide = parseStreamedSlideChunk(data.chunk);
@@ -360,14 +450,49 @@ export const usePresentationStreaming = (
 
           case "complete":
             try {
-              dispatch(
-                setPresentationData(
-                  mergePresentationPreservingTemplateData(
-                    normalizeBackendAssetUrls(data.presentation) as PresentationData
+              const hasCompletePresentation =
+                data.presentation &&
+                typeof data.presentation === "object" &&
+                !Array.isArray(data.presentation);
+              let completedPresentation: unknown = hasCompletePresentation
+                ? data.presentation
+                : null;
+
+              if (hasCompletePresentation) {
+                dispatch(
+                  setPresentationData(
+                    mergePresentationPreservingTemplateData(
+                      normalizeBackendAssetUrls(
+                        data.presentation
+                      ) as PresentationData
+                    )
                   )
-                )
-              );
-              trackTemplateV2StreamCompleted(data.presentation);
+                );
+              } else if (
+                isSmartMode &&
+                typeof data.presentation_id === "string" &&
+                data.presentation_id === presentationId
+              ) {
+                // Smart v2 completes with only the presentation id. The local
+                // proxy mirrors the finished cloud deck before forwarding this
+                // event, so load that persisted presentation for the editor.
+                const fetchedPresentation = await fetchUserSlides({
+                  clearHistory: false,
+                });
+                if (!fetchedPresentation) {
+                  throw new Error("Completed presentation could not be loaded");
+                }
+                completedPresentation = fetchedPresentation;
+              } else {
+                throw new Error("Completion event did not contain a presentation");
+              }
+
+              if (!completedPresentation) {
+                throw new Error("Completed presentation could not be loaded");
+              }
+
+              trackTemplateV2StreamCompleted(completedPresentation);
+              trackSmartModeGenerationCompleted(completedPresentation);
               dispatch(setStreaming(false));
               setLoading(false);
               isClosed = true;
@@ -379,9 +504,10 @@ export const usePresentationStreaming = (
               const newUrl = new URL(window.location.href);
               newUrl.searchParams.delete("stream");
               window.history.replaceState({}, "", newUrl.toString());
-            } catch {
+            } catch (error) {
+              console.error("Could not finalize presentation stream:", error);
               if (!scheduleRetry("failed to parse complete payload")) {
-                finalizeFailure("Failed to parse final presentation payload.");
+                finalizeFailure("Failed to load the completed presentation.");
               }
             }
             accumulatedChunks = "";
@@ -396,6 +522,7 @@ export const usePresentationStreaming = (
               )
             );
             trackTemplateV2StreamCompleted(data.presentation);
+            trackSmartModeGenerationCompleted(data.presentation);
             setLoading(false);
             dispatch(setStreaming(false));
             isClosed = true;
@@ -446,7 +573,10 @@ export const usePresentationStreaming = (
     const startStream = async () => {
       dispatch(setStreaming(true));
       dispatch(clearPresentationData());
-      trackEvent(MixpanelEvent.Presentation_Stream_API_Call);
+      trackEvent(MixpanelEvent.Presentation_Stream_API_Call, {
+        presentation_id: presentationId,
+        generation_mode: options.generationMode ?? "standard",
+      });
       await preloadPreparedPresentation();
       if (!isClosed) {
         openStream();
@@ -468,5 +598,8 @@ export const usePresentationStreaming = (
     setError,
     fetchUserSlides,
     preloadPresentationData,
+    isSmartMode,
+    options.generationMode,
+    usePresentonSmartEndpoint,
   ]);
 };

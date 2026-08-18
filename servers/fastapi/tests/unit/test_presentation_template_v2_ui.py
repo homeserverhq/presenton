@@ -1,5 +1,106 @@
+import copy
+
 from api.v1.ppt.endpoints import presentation as presentation_endpoint
 from services.chat.memory_layer import PresentationChatMemoryLayer
+
+
+def test_apply_template_content_to_ui_hydrates_latex_tag_into_run():
+    ui = {
+        "id": "math-layout",
+        "components": [
+            {
+                "id": "equation",
+                "elements": [
+                    {
+                        "type": "text",
+                        "decorative": False,
+                        "name": "formula",
+                        "runs": [
+                            {
+                                "type": "latex",
+                                "latex": "E = mc^2",
+                                "display_mode": True,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    hydrated = presentation_endpoint._apply_template_content_to_ui(
+        ui,
+        {"equation": {"formula": r"<latex>\sum_{i=1}^n x_i^2</latex>"}},
+    )
+
+    formula = hydrated["components"][0]["elements"][0]
+    assert formula["runs"] == [
+        {
+            "type": "latex",
+            "latex": r"\sum_{i=1}^n x_i^2",
+            "display_mode": True,
+        }
+    ]
+    assert "text" not in formula
+    assert ui["components"][0]["elements"][0]["runs"][0]["latex"] == "E = mc^2"
+
+
+def test_template_content_hydrates_mixed_latex_in_text_lists_and_tables():
+    ui = {
+        "id": "latex-layout",
+        "components": [
+            {
+                "id": "content",
+                "elements": [
+                    {
+                        "type": "text",
+                        "decorative": False,
+                        "name": "body",
+                        "font": {"family": "Inter"},
+                        "runs": [{"text": "Old"}],
+                    },
+                    {
+                        "type": "text-list",
+                        "decorative": False,
+                        "name": "facts",
+                        "items": [[{"text": "Old fact"}]],
+                    },
+                    {
+                        "type": "table",
+                        "decorative": False,
+                        "name": "values",
+                        "columns": [{"runs": [{"text": "Formula"}]}],
+                        "rows": [[{"runs": [{"text": "Old value"}]}]],
+                    },
+                ],
+            }
+        ],
+    }
+    content = {
+        "content": {
+            "body": r"Area is <latex>\pi r^2</latex>.",
+            "facts": [r"Identity: <latex>e^{i\pi}+1=0</latex>"],
+            "values": {
+                "columns": ["Formula"],
+                "rows": [[r"<latex>x^2</latex>"]],
+            },
+        }
+    }
+
+    endpoint_ui = presentation_endpoint._apply_template_content_to_ui(ui, content)
+    chat_ui = copy.deepcopy(ui)
+    PresentationChatMemoryLayer._apply_template_content_to_ui(chat_ui, content)
+
+    for hydrated in (endpoint_ui, chat_ui):
+        elements = hydrated["components"][0]["elements"]
+        assert [run.get("type") for run in elements[0]["runs"]] == [
+            None,
+            "latex",
+            None,
+        ]
+        assert elements[0]["runs"][1]["latex"] == r"\pi r^2"
+        assert elements[1]["items"][0][1]["latex"] == r"e^{i\pi}+1=0"
+        assert elements[2]["rows"][0][0]["runs"][0]["latex"] == r"x^2"
 
 
 def _duplicate_named_groups_ui():
@@ -1216,6 +1317,147 @@ def test_apply_template_content_to_ui_matches_repeated_content_lengths():
         [{"text": "Generated bullet one"}],
         [{"text": "Generated bullet two"}],
     ]
+
+
+def _branching_timeline_ui():
+    def timeline_group(index):
+        return {
+            "type": "group",
+            "name": f"timeline_{index}",
+            "position": {"x": index * 100, "y": index * 20},
+            "children": [
+                {
+                    "type": "group",
+                    "name": "timeline_items",
+                    "children": [
+                        {
+                            "type": "image",
+                            "decorative": True,
+                            "name": "connector_branch_path",
+                            "data": f"connector-{index}.svg",
+                            "is_icon": False,
+                        }
+                    ],
+                },
+                {
+                    "type": "group",
+                    "name": "timeline_milestone",
+                    "children": [
+                        {
+                            "type": "text",
+                            "decorative": False,
+                            "name": "milestone_title",
+                            "min_length": 4,
+                            "max_length": 20,
+                            "runs": [{"text": "Old title"}],
+                        },
+                        {
+                            "type": "image",
+                            "decorative": False,
+                            "name": "milestone_icon",
+                            "data": "/static/icons/placeholder.svg",
+                            "is_icon": True,
+                        },
+                    ],
+                },
+            ],
+        }
+
+    return {
+        "components": [
+            {
+                "id": "branching_timeline_area",
+                "elements": [
+                    timeline_group(index)
+                    for index in (4, 5, 3, 1, 2)
+                ],
+            }
+        ]
+    }
+
+
+def _branching_timeline_content():
+    return {
+        "branching_timeline_area": {
+            "timeline": [
+                {
+                    "timeline_milestone": {
+                        "milestone_title": title,
+                        "milestone_icon": {
+                            "icon_query": f"{title} icon",
+                            "icon_url": f"/static/icons/{index}.svg",
+                        },
+                    }
+                }
+                for index, title in enumerate(
+                    (
+                        "Owned Restaurants",
+                        "Franchising Scale",
+                        "Recipe Standards",
+                        "Distinct Formats",
+                        "Efficient Growth",
+                    ),
+                    start=1,
+                )
+            ]
+        }
+    }
+
+
+def _assert_branching_timeline_hydrated(ui):
+    elements = ui["components"][0]["elements"]
+    assert [element["name"] for element in elements] == [
+        "timeline_4",
+        "timeline_5",
+        "timeline_3",
+        "timeline_1",
+        "timeline_2",
+    ]
+    assert [len(element["children"]) for element in elements] == [2] * 5
+    assert [
+        element["children"][1]["children"][0]["runs"][0]["text"]
+        for element in elements
+    ] == [
+        "Owned Restaurants",
+        "Franchising Scale",
+        "Recipe Standards",
+        "Distinct Formats",
+        "Efficient Growth",
+    ]
+    assert [
+        element["children"][1]["children"][1]["data"]
+        for element in elements
+    ] == [f"/static/icons/{index}.svg" for index in range(1, 6)]
+    assert [
+        element["children"][0]["children"][0]["data"]
+        for element in elements
+    ] == [
+        "connector-4.svg",
+        "connector-5.svg",
+        "connector-3.svg",
+        "connector-1.svg",
+        "connector-2.svg",
+    ]
+
+
+def test_apply_template_content_to_ui_hydrates_repeated_top_level_groups():
+    hydrated = presentation_endpoint._apply_template_content_to_ui(
+        _branching_timeline_ui(),
+        _branching_timeline_content(),
+    )
+
+    _assert_branching_timeline_hydrated(hydrated)
+
+
+def test_chat_template_content_hydrates_repeated_top_level_groups():
+    ui = _branching_timeline_ui()
+
+    PresentationChatMemoryLayer._apply_template_content_to_ui(
+        ui,
+        _branching_timeline_content(),
+    )
+
+    _assert_branching_timeline_hydrated(ui)
 
 
 def test_apply_template_content_to_ui_hydrates_direct_repeated_images():

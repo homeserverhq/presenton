@@ -162,8 +162,25 @@ class TextRun(BaseModel):
     text: str
     font: Optional[Font] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_non_text_run_types(cls, value):
+        if isinstance(value, dict) and value.get("type") not in {None, "text"}:
+            raise ValueError("Text runs may only use type='text'")
+        return value
 
-class Text(BaseModel):  # Konva Text
+
+class LatexTextRun(BaseModel):
+    type: Literal["latex"]
+    latex: str = Field(min_length=1, max_length=4000)
+    display_mode: bool = False
+    font: Optional[Font] = None
+
+
+TextRunValue: TypeAlias = Union[TextRun, LatexTextRun]
+
+
+class Text(BaseModel):
     type: Literal["text"]
     position: Optional[Position] = None
     size: Optional[Size] = None
@@ -173,7 +190,7 @@ class Text(BaseModel):  # Konva Text
     fill: Optional[Fill] = None
     stroke: Optional[Stroke] = None
     shadow: Optional[Shadow] = None
-    runs: list[TextRun]
+    runs: list[TextRunValue]
 
     # Schema
     decorative: bool
@@ -228,7 +245,7 @@ class TextList(BaseModel):  # Konva Group
     rotation: Optional[float] = None
     font: Optional[Font] = None
     marker: Optional[Marker] = None
-    items: list[list[TextRun]]
+    items: list[list[TextRunValue]]
 
     # Schema
     decorative: bool
@@ -243,7 +260,7 @@ class TableCell(BaseModel):
     color: Optional[Fill] = None
     font: Optional[Font] = None
     alignment: Optional[HorizontalAlignment] = None
-    runs: List[TextRun]
+    runs: List[TextRunValue]
 
 
 class Table(BaseModel):
@@ -479,6 +496,7 @@ __all__ = [
     "InfographicType",
     "GaugeInfographicData",
     "LayoutAlignment",
+    "LatexTextRun",
     "Marker",
     "Padding",
     "Position",
@@ -493,6 +511,7 @@ __all__ = [
     "Text",
     "TextList",
     "TextRun",
+    "TextRunValue",
     "VerticalAlignment",
     "Vector",
     "VectorCurve",

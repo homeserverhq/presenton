@@ -17,17 +17,14 @@ import { LegacyPresentationsTable } from "@/app/(presentation-generator)/(dashbo
 import { PresentationGenerationApi } from "@/app/(presentation-generator)/services/api/presentation-generation";
 import Link from "next/link";
 import Image from "next/image";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { trackEvent, MixpanelEvent } from "@/utils/mixpanel";
 import { usePathname, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { notify } from "@/components/ui/sonner";
 import { sanitizeAnalyticsError } from "@/utils/analytics";
-import {
-  IMAGE_PROVIDERS,
-  LLM_PROVIDERS,
-} from "@/utils/providerConstants";
+import { IMAGE_PROVIDERS, LLM_PROVIDERS } from "@/utils/providerConstants";
 
 const GITHUB_REPOSITORY_URL = "https://github.com/presenton/presenton";
 const DISCORD_INVITE_URL = "https://discord.com/invite/9ZsKKxudNE";
@@ -55,7 +52,7 @@ const DashboardHeaderDivider = () => (
 );
 
 const FloatingActionCards = () => (
-  <div className="pointer-events-none absolute right-[14px] top-[-36px] z-0 block h-[64px] w-[158px]">
+  <div className="pointer-events-none absolute right-[14px] top-[-35px] z-0 hidden h-[64px] w-[158px] sm:block">
     <div
       className={`${actionCardBase} left-0 top-0 border-none group-hover/action:-translate-x-2 group-hover/action:-rotate-3 group-focus-visible/action:-translate-x-2 group-focus-visible/action:-rotate-3`}
       style={{
@@ -74,6 +71,106 @@ const FloatingActionCards = () => (
         backgroundImage: "url('/create_presentation_card_1.png')",
       }}
     />
+  </div>
+);
+
+type DashboardActionCardProps = {
+  href?: string;
+  title: string;
+  media: React.ReactNode;
+  ariaLabel: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  isLoading?: boolean;
+  children?: React.ReactNode;
+  mediaClassName?: string;
+};
+
+const DashboardActionCard = ({
+  href,
+  title,
+  media,
+  ariaLabel,
+  onClick,
+  disabled = false,
+  isLoading = false,
+  children,
+  mediaClassName = "w-[96px]",
+}: DashboardActionCardProps) => {
+  const className =
+    "group/action relative isolate flex h-[90px] w-full min-w-0 overflow-visible rounded-[10.8px] border border-[#EDEEEF] bg-white text-[#191919] outline-none transition-all duration-300 hover:border-[#D7D8DE] hover:shadow-[0_10px_28px_rgba(16,24,40,0.08)] focus-visible:ring-2 focus-visible:ring-[#7A5AF8] focus-visible:ring-offset-4 disabled:cursor-wait disabled:opacity-70 disabled:hover:border-[#EDEEEF] disabled:hover:shadow-none";
+  const content = (
+    <>
+      {children}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-10 rounded-[10.8px] bg-white"
+      />
+      <div
+        className={`relative z-20 h-full ${mediaClassName} shrink-0 overflow-hidden rounded-l-[10.8px] bg-[#F8F8FB]`}
+      >
+        {media}
+      </div>
+      <span className="relative z-20 flex min-w-0 flex-1 items-center justify-center px-3 text-center font-syne text-sm font-medium leading-normal text-[#191919] sm:px-4">
+        {title}
+      </span>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        onClick={onClick}
+        aria-label={ariaLabel}
+        className={className}
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      aria-busy={isLoading}
+      className={className}
+    >
+      {content}
+    </button>
+  );
+};
+
+const BlankPresentationIllustration = ({
+  isLoading,
+}: {
+  isLoading: boolean;
+}) => (
+  <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[#D1E9FF]">
+    <div className="relative h-[90px] w-[90px] shrink-0">
+      <div className="absolute left-[22.312px] top-[20.46px] h-[52.514px] w-[48.892px] -rotate-[5.81deg] bg-[rgba(0,0,0,0.14)]" />
+      <div className="absolute left-[21.452px] top-[19.94px] h-[52.514px] w-[48.892px] -rotate-[5.81deg] bg-[#ECEEEE]" />
+      <div className="absolute left-[23.57px] top-[21.78px] h-[50.53px] w-[47.045px] bg-[rgba(0,0,0,0.14)]" />
+      <div className="absolute left-[22.79px] top-[21.2px] h-[50.53px] w-[47.045px] bg-[#FEFEFF]" />
+      <Image
+        src="/dashboard/blank-presentation-clip.svg"
+        alt=""
+        aria-hidden="true"
+        width={9}
+        height={15}
+        className="absolute left-[25.05px] top-[15.66px] h-[14.283px] w-[8.282px]"
+      />
+      <div className="absolute left-[25.31px] top-[21.2px] h-[0.387px] w-[0.968px] bg-[#FEFEFF]" />
+    </div>
+
+    {isLoading && (
+      <div className="absolute inset-0 flex items-center justify-center bg-[#D1E9FF]/75">
+        <Loader2 className="h-5 w-5 animate-spin text-[#6847F4]" />
+      </div>
+    )}
   </div>
 );
 
@@ -99,10 +196,9 @@ const ListViewIcon = () => (
   />
 );
 
-const sortPresentationsNewestFirst = (
-  presentations: PresentationResponse[]
-) =>
+const sortPresentationsNewestFirst = (presentations: PresentationResponse[]) =>
   [...presentations].sort((a, b) => {
+    
     const createdAtA = Date.parse(a.created_at);
     const createdAtB = Date.parse(b.created_at);
 
@@ -125,7 +221,7 @@ function formatGitHubStars(stars: number) {
 function DashboardHeader() {
   const pathname = usePathname();
   const llmConfig = useSelector(
-    (state: RootState) => state.userConfig.llm_config
+    (state: RootState) => state.userConfig.llm_config,
   );
   const [isElectronApp, setIsElectronApp] = useState(false);
 
@@ -135,14 +231,13 @@ function DashboardHeader() {
     : IMAGE_PROVIDERS[llmConfig.IMAGE_PROVIDER || ""];
   const configuredProviders = [textProvider, imageProvider].filter(
     (provider): provider is NonNullable<typeof provider> =>
-      Boolean(provider?.icon)
+      Boolean(provider?.icon),
   );
 
   useEffect(() => {
     setIsElectronApp(Boolean(window.electron));
 
     let isMounted = true;
-
 
     return () => {
       isMounted = false;
@@ -180,8 +275,9 @@ function DashboardHeader() {
                 {configuredProviders.map((provider, index) => (
                   <span
                     key={`${provider.value}-${index}`}
-                    className={`relative h-[22px] w-[22px] shrink-0 overflow-hidden rounded-full border-[1.238px] border-[#EDEEEF] bg-white ${index > 0 ? "-ml-[4.4px]" : "z-10"
-                      }`}
+                    className={`relative h-[22px] w-[22px] shrink-0 overflow-hidden rounded-full border-[1.238px] border-[#EDEEEF] bg-white ${
+                      index > 0 ? "-ml-[4.4px]" : "z-10"
+                    }`}
                   >
                     <Image
                       src={provider.icon!}
@@ -200,8 +296,6 @@ function DashboardHeader() {
             </Link>
 
             <DashboardHeaderDivider />
-
-
 
             <Link
               href={DISCORD_INVITE_URL}
@@ -250,10 +344,7 @@ function DashboardHeader() {
                 height={18}
                 className="h-[17.6px] w-[17.6px] shrink-0"
               />
-
             </Link>
-
-
           </div>
 
           {isElectronApp && (
@@ -300,7 +391,9 @@ function DashboardHeader() {
 const DashboardPage: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
-  const [presentations, setPresentations] = useState<PresentationResponse[]>([]);
+  const [presentations, setPresentations] = useState<PresentationResponse[]>(
+    [],
+  );
   const [legacyPresentations, setLegacyPresentations] = useState<
     PresentationResponse[]
   >([]);
@@ -313,12 +406,12 @@ const DashboardPage: React.FC = () => {
 
   const sortedPresentations = useMemo(
     () => sortPresentationsNewestFirst(presentations),
-    [presentations]
+    [presentations],
   );
 
   const sortedLegacyPresentations = useMemo(
     () => sortPresentationsNewestFirst(legacyPresentations),
-    [legacyPresentations]
+    [legacyPresentations],
   );
 
   const fetchPresentations = useCallback(async () => {
@@ -372,7 +465,7 @@ const DashboardPage: React.FC = () => {
         slide_count: presentation.n_slides,
       });
       router.push(
-        `/presentation?id=${encodeURIComponent(presentation.id)}&type=standard`
+        `/presentation?id=${encodeURIComponent(presentation.id)}&type=standard`,
       );
     } catch (creationError) {
       const message =
@@ -393,14 +486,14 @@ const DashboardPage: React.FC = () => {
   const removePresentation = (presentationId: string) => {
     setPresentations((prev) => prev.filter((p) => p.id !== presentationId));
     setLegacyPresentations((prev) =>
-      prev.filter((p) => p.id !== presentationId)
+      prev.filter((p) => p.id !== presentationId),
     );
   };
 
   const removeLegacyPresentations = (presentationIds: string[]) => {
     const deletedIds = new Set(presentationIds);
     setLegacyPresentations((prev) =>
-      prev.filter((presentation) => !deletedIds.has(presentation.id))
+      prev.filter((presentation) => !deletedIds.has(presentation.id)),
     );
   };
 
@@ -411,8 +504,8 @@ const DashboardPage: React.FC = () => {
         <h2 className="w-full font-syne text-[16px] font-medium leading-[normal] text-[#191919]">
           Actions
         </h2>
-        <div className="mt-[18px] flex flex-wrap items-start gap-4">
-          <Link
+        <div className="mt-[18px] grid w-full max-w-[625px] grid-cols-1 gap-4 sm:grid-cols-2">
+          <DashboardActionCard
             href="/upload"
             onClick={() =>
               trackEvent(MixpanelEvent.Dashboard_New_Presentation_Clicked, {
@@ -420,45 +513,40 @@ const DashboardPage: React.FC = () => {
                 source: "dashboard_actions_card",
               })
             }
-            className="group/action relative z-50 block w-[304.5px] max-w-full cursor-pointer overflow-visible rounded-[10.8px] bg-white outline-none focus-visible:ring-2 focus-visible:ring-[#7A5AF8] focus-visible:ring-offset-4"
-            aria-label="Create presentation"
+            title="Create new Presentation"
+            ariaLabel="Create new presentation"
+            media={
+              <Image
+                src="/create_presentation_bg.png"
+                alt=""
+                fill
+                sizes="96px"
+                className="h-full w-full object-cover object-left"
+              />
+            }
           >
             <FloatingActionCards />
+          </DashboardActionCard>
 
-            <img
-              src="/create_presentation_bg.png"
-              alt="Background of the create presentation card"
-              className="relative z-10 h-[89.983px] w-[304.5px] max-w-full rounded-[10.8px] bg-white object-cover"
-            />
-            <span className="absolute inset-0 z-20 flex items-center justify-center text-center font-syne text-sm font-medium text-[#191919]">
-              Create Presentation
-            </span>
-          </Link>
-
-          <button
-            type="button"
+          <DashboardActionCard
             onClick={() => void createBlankPresentation()}
             disabled={isCreatingBlankPresentation}
-            aria-busy={isCreatingBlankPresentation}
-            className="group relative z-50 flex h-[89.983px] w-[304.5px] max-w-full items-center overflow-hidden rounded-[10.8px] border border-[#EDEEEF] bg-[linear-gradient(135deg,#FAFAFF_0%,#F3F0FF_100%)] px-5 text-left outline-none transition hover:border-[#CFC7FF] hover:shadow-[0_8px_22px_rgba(81,70,229,0.12)] focus-visible:ring-2 focus-visible:ring-[#7A5AF8] focus-visible:ring-offset-4 disabled:cursor-not-allowed disabled:opacity-70"
-            aria-label="Create blank presentation"
-          >
-            <span className="font-syne text-sm font-medium text-[#191919]">
-              {isCreatingBlankPresentation
+            isLoading={isCreatingBlankPresentation}
+            title={
+              isCreatingBlankPresentation ? "Creating..." : "Blank Presentation"
+            }
+            ariaLabel={
+              isCreatingBlankPresentation
                 ? "Creating blank presentation"
-                : "Blank Presentation"}
-            </span>
-            <span
-              className="ml-auto flex aspect-video w-[112px] items-center justify-center rounded-[6px] border border-[#DDD9F8] bg-white shadow-[0_6px_14px_rgba(16,24,40,0.12)] transition-transform group-hover:-translate-y-0.5"
-              aria-hidden="true"
-            >
-              {isCreatingBlankPresentation ? (
-                <Loader2 className="h-5 w-5 animate-spin text-[#7A5AF8]" />
-              ) : (
-                <Plus className="h-5 w-5 text-[#7A5AF8]" />
-              )}
-            </span>
-          </button>
+                : "Create blank presentation"
+            }
+            mediaClassName="w-[90px]"
+            media={
+              <BlankPresentationIllustration
+                isLoading={isCreatingBlankPresentation}
+              />
+            }
+          />
         </div>
       </section>
       <section className="relative z-10 mt-[46px] pl-3 pr-3 sm:pl-6 sm:pr-[9px]">

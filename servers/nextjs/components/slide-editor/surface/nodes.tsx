@@ -48,6 +48,7 @@ import {
 } from "@/components/slide-editor/surface/latestFrameBatch";
 import { TemplateV2ChartJsElement as RawChartElement } from "@/components/slide-editor/charts/TemplateV2ChartJsElement";
 import { TemplateV2TableElement as RawTableElement } from "@/components/slide-editor/tables/TemplateV2TableElement";
+import { LatexRunNode } from "@/components/slide-editor/math/LatexRunNode";
 import { buildSvgUpdateUrl } from "@/lib/svg-color";
 import {
   componentSideResizeBox,
@@ -421,6 +422,9 @@ export function RawComponentNode({
   onComponentDragMove,
   onComponentDragEnd,
   onElementChange,
+  onElementDragStart,
+  onElementDragMove,
+  onElementDragComplete,
   fontRevision,
 }: {
   component: RawComponent;
@@ -454,6 +458,18 @@ export function RawComponentNode({
   onElementChange: (
     selection: ElementSelection,
     updater: (element: RawElement) => RawElement,
+  ) => void;
+  onElementDragStart: (
+    selection: ElementSelection,
+    node: Konva.Node,
+  ) => void;
+  onElementDragMove: (
+    selection: ElementSelection,
+    node: Konva.Node,
+  ) => void;
+  onElementDragComplete: (
+    selection: ElementSelection,
+    node: Konva.Node,
   ) => void;
   fontRevision: number;
 }) {
@@ -742,6 +758,9 @@ export function RawComponentNode({
           onOpenEditor={onOpenElementEditor}
           onElementChange={onElementChange}
           onElementDragEnd={handleSingleElementComponentDragEnd}
+          onElementDragStart={onElementDragStart}
+          onElementDragMove={onElementDragMove}
+          onElementDragComplete={onElementDragComplete}
           parentBox={box}
           textConstraintBox={{
             x: 0,
@@ -805,6 +824,9 @@ export const MemoizedRawComponentNode = memo(
       previous.onComponentDragMove !== next.onComponentDragMove ||
       previous.onComponentDragEnd !== next.onComponentDragEnd ||
       previous.onElementChange !== next.onElementChange ||
+      previous.onElementDragStart !== next.onElementDragStart ||
+      previous.onElementDragMove !== next.onElementDragMove ||
+      previous.onElementDragComplete !== next.onElementDragComplete ||
       previous.selectedTableCell !== next.selectedTableCell ||
       previous.selectedKey !== next.selectedKey ||
       previous.fontRevision !== next.fontRevision
@@ -838,6 +860,9 @@ function RawElementNode({
   onOpenEditor,
   onElementChange,
   onElementDragEnd,
+  onElementDragStart,
+  onElementDragMove,
+  onElementDragComplete,
   parentBox,
   textConstraintBox,
   renderBox,
@@ -873,6 +898,18 @@ function RawElementNode({
     updater: (element: RawElement) => RawElement,
   ) => void;
   onElementDragEnd?: (selection: ElementSelection, delta: Point) => boolean;
+  onElementDragStart?: (
+    selection: ElementSelection,
+    node: Konva.Node,
+  ) => void;
+  onElementDragMove?: (
+    selection: ElementSelection,
+    node: Konva.Node,
+  ) => void;
+  onElementDragComplete?: (
+    selection: ElementSelection,
+    node: Konva.Node,
+  ) => void;
   parentBox: Box;
   textConstraintBox?: Box | null;
   renderBox?: Box | null;
@@ -958,15 +995,19 @@ function RawElementNode({
       if (!vectorDraggable) return;
       event.cancelBubble = true;
       onSelect(selection);
+      const node = groupRef.current;
+      if (node) onElementDragStart?.(selection, node);
     },
-    [onSelect, selection, vectorDraggable],
+    [onElementDragStart, onSelect, selection, vectorDraggable],
   );
   const handleVectorDragMove = useCallback(
     (event: Konva.KonvaEventObject<DragEvent>) => {
       if (!vectorDraggable) return;
       event.cancelBubble = true;
+      const node = groupRef.current;
+      if (node) onElementDragMove?.(selection, node);
     },
-    [vectorDraggable],
+    [onElementDragMove, selection, vectorDraggable],
   );
   const handleVectorDragEnd = useCallback(
     (event: Konva.KonvaEventObject<DragEvent>) => {
@@ -974,6 +1015,7 @@ function RawElementNode({
       event.cancelBubble = true;
       const node = groupRef.current;
       if (!node) return;
+      onElementDragComplete?.(selection, node);
       const nextPosition = {
         x: node.x() - (centerOrigin ? box.width / 2 : 0),
         y: node.y() - (centerOrigin ? box.height / 2 : 0),
@@ -1006,6 +1048,7 @@ function RawElementNode({
       centerOrigin,
       layoutManaged,
       onElementChange,
+      onElementDragComplete,
       onElementDragEnd,
       selection,
       vectorDraggable,
@@ -1310,6 +1353,9 @@ function RawElementNode({
           onOpenEditor={onOpenEditor}
           onElementChange={onElementChange}
           onElementDragEnd={onElementDragEnd}
+          onElementDragStart={onElementDragStart}
+          onElementDragMove={onElementDragMove}
+          onElementDragComplete={onElementDragComplete}
           allowVectorResizeBeyondParent={false}
           allowVectorPointEditing={allowVectorPointEditing}
           allowDirectVectorSelection={allowDirectVectorSelection}
@@ -1350,6 +1396,9 @@ export const MemoizedRawElementNode = memo(RawElementNode, (previous, next) => {
     previous.onOpenEditor !== next.onOpenEditor ||
     previous.onElementChange !== next.onElementChange ||
     previous.onElementDragEnd !== next.onElementDragEnd ||
+    previous.onElementDragStart !== next.onElementDragStart ||
+    previous.onElementDragMove !== next.onElementDragMove ||
+    previous.onElementDragComplete !== next.onElementDragComplete ||
     !numberPathEqual(previous.elementPath, next.elementPath) ||
     !boxEqual(previous.parentBox, next.parentBox) ||
     !nullableBoxEqual(previous.textConstraintBox, next.textConstraintBox) ||
@@ -1838,6 +1887,22 @@ function RawRichTextElement({
         return line.map((segment, segmentIndex) => {
           const segmentX = x;
           x += segment.width;
+          if (segment.type === "latex" && segment.latex) {
+            return (
+              <LatexRunNode
+                key={`${lineIndex}:${segmentIndex}`}
+                x={segmentX}
+                y={lineY}
+                width={segment.width}
+                height={lineMetric.height}
+                latex={segment.latex}
+                displayMode={segment.displayMode}
+                fontSize={segment.font.size}
+                color={textFill(segment.font) ?? "#111827"}
+                interactive={interactive}
+              />
+            );
+          }
           // Keep width automatic. The custom layout owns the x advance; a fixed
           // tight width lets Konva re-wrap and clip the final glyph.
           return (
@@ -1886,24 +1951,39 @@ function RawTextListElement({
   return (
     <Group listening={interactive}>
       {tokens.map((token, tokenIndex) => (
-        <Text
-          key={`${tokenIndex}:${token.x}:${token.y}`}
-          x={token.x}
-          y={token.y}
-          height={token.height}
-          text={renderKonvaTextSegment(token.text)}
-          fill={textFill(token.font)}
-          fontFamily={`${token.font.family}, Helvetica, sans-serif`}
-          fontSize={token.font.size}
-          fontStyle={`${token.font.bold ? "bold" : "normal"} ${token.font.italic ? "italic" : ""}`}
-          textDecoration={token.font.underline ? "underline" : ""}
-          verticalAlign="middle"
-          lineHeight={token.font.lineHeight}
-          letterSpacing={token.font.letterSpacing}
-          wrap="none"
-          {...shadowProps(element)}
-          listening={interactive}
-        />
+        token.type === "latex" && token.latex ? (
+          <LatexRunNode
+            key={`${tokenIndex}:${token.x}:${token.y}`}
+            x={token.x}
+            y={token.y}
+            width={token.width}
+            height={token.height}
+            latex={token.latex}
+            displayMode={token.displayMode}
+            fontSize={token.font.size}
+            color={textFill(token.font) ?? "#111827"}
+            interactive={interactive}
+          />
+        ) : (
+          <Text
+            key={`${tokenIndex}:${token.x}:${token.y}`}
+            x={token.x}
+            y={token.y}
+            height={token.height}
+            text={renderKonvaTextSegment(token.text)}
+            fill={textFill(token.font)}
+            fontFamily={`${token.font.family}, Helvetica, sans-serif`}
+            fontSize={token.font.size}
+            fontStyle={`${token.font.bold ? "bold" : "normal"} ${token.font.italic ? "italic" : ""}`}
+            textDecoration={token.font.underline ? "underline" : ""}
+            verticalAlign="middle"
+            lineHeight={token.font.lineHeight}
+            letterSpacing={token.font.letterSpacing}
+            wrap="none"
+            {...shadowProps(element)}
+            listening={interactive}
+          />
+        )
       ))}
     </Group>
   );
@@ -2764,16 +2844,23 @@ function RawInfographicElement({
     "#E5E7EB";
   const highlightColor =
     withHash(readString(colors[1])) ?? "#2563EB";
-  const value = readNumber(data?.value) ?? 0;
-
   if (infographicType === "progress_bar") {
-    const radius = Math.min(height / 2, 8);
+    const barHeight = Math.max(6, Math.min(18, Math.round(height * 0.35)));
+    const barY = (height - barHeight) / 2;
+    const radius = barHeight / 2;
     return (
       <Group listening={interactive} {...shadowProps(element)}>
-        <Rect width={width} height={height} cornerRadius={radius} fill={baseColor} />
         <Rect
+          y={barY}
+          width={width}
+          height={barHeight}
+          cornerRadius={radius}
+          fill={baseColor}
+        />
+        <Rect
+          y={barY}
           width={width * progress}
-          height={height}
+          height={barHeight}
           cornerRadius={radius}
           fill={highlightColor}
         />
@@ -2782,7 +2869,7 @@ function RawInfographicElement({
   }
 
   const valueAngle = 180 * progress;
-  const thickness = Math.max(6, Math.min(width, height) * 0.18);
+  const thickness = Math.max(6, Math.min(width * 0.1, height / 6));
   const outerRadius = Math.max(1, Math.min(width * 0.43, height * 0.86));
   const innerRadius = Math.max(1, outerRadius - thickness);
   const middleRadius = (outerRadius + innerRadius) / 2;
@@ -2824,19 +2911,6 @@ function RawInfographicElement({
           <Circle x={end.x} y={end.y} radius={capRadius} fill={highlightColor} />
         </>
       ) : null}
-      <Text
-        x={0}
-        y={height * 0.5}
-        width={width}
-        height={height * 0.3}
-        text={String(Math.round(value))}
-        fontFamily="Arial, Helvetica, sans-serif"
-        fontSize={Math.max(10, Math.min(width, height) * 0.22)}
-        fontStyle="bold"
-        align="center"
-        verticalAlign="middle"
-        fill="#172033"
-      />
     </Group>
   );
 }

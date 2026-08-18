@@ -25,12 +25,14 @@ from services.mem0_presentation_memory_service import MEM0_PRESENTATION_MEMORY_S
 from services.temp_file_service import TEMP_FILE_SERVICE
 from templates.presentation_layout import PresentationLayoutModel, SlideLayoutModel
 from templates.v2.schema import get_template_schema
+from templates.v2.content import hydrate_repeated_top_level_groups
 from utils.asset_directory_utils import (
     filesystem_image_path_to_app_data_url,
     get_images_directory,
     normalize_slide_asset_url,
 )
 from utils.icon_weights import DEFAULT_ICON_WEIGHT, extract_icon_type_from_settings
+from utils.latex_text import normalize_latex, replace_text_runs, text_runs_to_tagged_text
 from utils.outline_utils import get_presentation_title_from_presentation_outline
 from utils.outline_limits import normalize_outline_content
 from utils.process_slides import (
@@ -68,6 +70,7 @@ BLANK_TEMPLATE_LAYOUT: dict[str, Any] = {
 }
 TEMPLATE_GENERATED_ELEMENT_TYPES = {
     "text",
+    "math",
     "image",
     "text-list",
     "table",
@@ -300,9 +303,17 @@ class PresentationChatMemoryLayer:
     decoupled from storage details.
     """
 
-    def __init__(self, sql_session: AsyncSession, presentation_id: uuid.UUID):
+    def __init__(
+        self,
+        sql_session: AsyncSession,
+        presentation_id: uuid.UUID,
+        presentation_type: str = "standard",
+    ):
         self._sql_session = sql_session
         self._presentation_id = presentation_id
+        self.presentation_type = (
+            "smart" if presentation_type == "smart" else "standard"
+        )
 
     async def get(self, key: str) -> Any:
         if key != "presentation_outline":
@@ -321,6 +332,23 @@ class PresentationChatMemoryLayer:
                 self._presentation_id,
                 len(slides),
             )
+            if self.presentation_type == "smart":
+                return {
+                    "source": "slides_table",
+                    "format": "html",
+                    "slide_count": len(slides),
+                    "slides": [
+                        {
+                            "slide_id": str(slide.id),
+                            "index": slide.index,
+                            "content": self._html_to_text(
+                                slide.html_content or ""
+                            )[:1200],
+                            "has_html": bool((slide.html_content or "").strip()),
+                        }
+                        for slide in slides
+                    ],
+                }
             return {
                 "source": "slides_table",
                 "slide_count": len(slides),
@@ -441,6 +469,19 @@ class PresentationChatMemoryLayer:
             ),
             "speaker_note": slide.speaker_note,
         }
+        if self.presentation_type == "smart":
+            html = slide.html_content or ""
+            response.update(
+                {
+                    "format": "html",
+                    "has_html": bool(html.strip()),
+                    "html_length": len(html),
+                    "html_text_preview": self._html_to_text(html)[:1200],
+                }
+            )
+            if include_full_content:
+                response["html"] = html
+            return response
         ui = self._slide_ui_layout(slide)
         if include_full_content:
             response["content"] = slide.content
@@ -1111,6 +1152,182 @@ class PresentationChatMemoryLayer:
             "shifted_slide_count": len(slides_to_shift),
         }
 
+    async def get_smart_presentation_context(
+        self,
+        *,
+        include_slide_html: bool = False,
+        max_html_chars_per_slide: int = 0,
+    ) -> dict[str, Any]:
+        presentation = await self._sql_session.get(
+            PresentationModel,
+            self._presentation_id,
+        )
+        if not presentation:
+            return {"found": False, "message": "Presentation not found."}
+
+        slides_result = await self._sql_session.scalars(
+            select(SlideModel)
+            .where(SlideModel.presentation == self._presentation_id)
+            .order_by(SlideModel.index)
+        )
+        slides = list(slides_result)
+        slide_rows: list[dict[str, Any]] = []
+        for slide in slides:
+            html = slide.html_content or ""
+            row: dict[str, Any] = {
+                "slide_id": str(slide.id),
+                "index": slide.index,
+                "slide_number": slide.index + 1,
+                "title": self._smart_slide_title(html, slide.index),
+                "html_length": len(html),
+                "html_text_preview": self._html_to_text(html)[:1200],
+            }
+            if include_slide_html:
+                row["html"] = (
+                    html[:max_html_chars_per_slide]
+                    if max_html_chars_per_slide > 0
+                    else html
+                )
+            slide_rows.append(row)
+
+        return {
+            "found": True,
+            "stage": "html_slides" if slides else "missing_html_slides",
+            "presentation_id": str(presentation.id),
+            "title": presentation.title,
+            "language": presentation.language,
+            "tone": presentation.tone,
+            "verbosity": presentation.verbosity,
+            "instructions": presentation.instructions,
+            "fonts": presentation.fonts or {},
+            "community_design_ids": presentation.community_design_ids or [],
+            "outlines": presentation.outlines,
+            "structure": presentation.structure,
+            "slide_count": len(slides),
+            "slides": slide_rows,
+        }
+
+    async def save_html_slide(
+        self,
+        *,
+        html: str,
+        index: int,
+        replace_old_slide_at_index: bool,
+        speaker_note: str | None = None,
+    ) -> dict[str, Any]:
+        from fastapi import HTTPException
+        from utils.llm_calls.generate_smart_presentation import (
+            normalize_smart_slide_html,
+        )
+
+        presentation = await self._sql_session.get(
+            PresentationModel,
+            self._presentation_id,
+        )
+        if not presentation:
+            return {
+                "saved": False,
+                "message": "Presentation not found.",
+                "validation_errors": [],
+            }
+        if presentation.generation_mode != "smart":
+            return {
+                "saved": False,
+                "message": "Only Smart presentations can save HTML slides.",
+                "validation_errors": [],
+            }
+
+        try:
+            normalized_html = normalize_smart_slide_html(html)
+        except HTTPException as exc:
+            return {
+                "saved": False,
+                "message": "Smart slide HTML failed validation.",
+                "validation_errors": [str(exc.detail)],
+            }
+
+        target_index = max(0, index)
+        title = self._smart_slide_title(normalized_html, target_index)
+        if replace_old_slide_at_index:
+            slide = await self._sql_session.scalar(
+                select(SlideModel).where(
+                    SlideModel.presentation == self._presentation_id,
+                    SlideModel.index == target_index,
+                )
+            )
+            if not slide:
+                return {
+                    "saved": False,
+                    "message": f"No Smart slide found at index {target_index}.",
+                    "validation_errors": [],
+                }
+            slide.layout_group = "smart-html"
+            slide.layout = "smart-html"
+            slide.content = {"title": title}
+            slide.html_content = normalized_html
+            slide.ui = None
+            if speaker_note is not None:
+                slide.speaker_note = speaker_note
+            self._sql_session.add(slide)
+            await self._sql_session.commit()
+            return {
+                "saved": True,
+                "action": "replaced",
+                "message": f"Smart slide at index {target_index} was replaced.",
+                "slide_id": str(slide.id),
+                "index": target_index,
+                "slide_number": target_index + 1,
+            }
+
+        slides_result = await self._sql_session.scalars(
+            select(SlideModel)
+            .where(SlideModel.presentation == self._presentation_id)
+            .order_by(SlideModel.index)
+        )
+        slides = list(slides_result)
+        if len(slides) >= MAX_NUMBER_OF_SLIDES:
+            return {
+                "saved": False,
+                "message": (
+                    "Slide limit reached. You can have at most "
+                    f"{MAX_NUMBER_OF_SLIDES} slides."
+                ),
+                "validation_errors": [],
+            }
+
+        insert_index = min(target_index, len(slides))
+        for slide in sorted(
+            [item for item in slides if item.index >= insert_index],
+            key=lambda item: item.index,
+            reverse=True,
+        ):
+            slide.index += 1
+            self._sql_session.add(slide)
+
+        new_slide = SlideModel(
+            presentation=self._presentation_id,
+            layout_group="smart-html",
+            layout="smart-html",
+            index=insert_index,
+            content={"title": title},
+            html_content=normalized_html,
+            speaker_note=speaker_note or "",
+            ui=None,
+        )
+        presentation.n_slides = len(slides) + 1
+        self._sql_session.add(presentation)
+        self._sql_session.add(new_slide)
+        await self._sql_session.commit()
+        await self._sql_session.refresh(new_slide)
+        return {
+            "saved": True,
+            "action": "created",
+            "message": f"Smart slide added at index {insert_index}.",
+            "slide_id": str(new_slide.id),
+            "index": insert_index,
+            "slide_number": insert_index + 1,
+        }
+
     async def delete_slide(self, *, index: int) -> dict[str, Any]:
         target_index = max(0, index)
         slide = await self._sql_session.scalar(
@@ -1136,11 +1353,31 @@ class PresentationChatMemoryLayer:
         deleted_slide_id = str(slide.id)
 
         if len(slides) <= 1:
-            fallback_slide = self._create_blank_slide_from_reference(
-                presentation=presentation,
-                source_slide=slide,
-                index=0,
-            )
+            if self.presentation_type == "smart":
+                fallback_slide = SlideModel(
+                    owner_id=slide.owner_id,
+                    presentation=self._presentation_id,
+                    layout_group="smart-html",
+                    layout="smart-html",
+                    index=0,
+                    content={"title": "Untitled slide"},
+                    html_content=(
+                        '<section data-slide-type="content" '
+                        'data-slide-title="Untitled slide" '
+                        'class="relative h-[720px] w-[1280px] overflow-hidden '
+                        'bg-white"><div class="flex h-full items-center '
+                        'justify-center p-16"><h2 class="text-5xl font-semibold '
+                        'text-slate-900">Untitled slide</h2></div></section>'
+                    ),
+                    speaker_note="",
+                    ui=None,
+                )
+            else:
+                fallback_slide = self._create_blank_slide_from_reference(
+                    presentation=presentation,
+                    source_slide=slide,
+                    index=0,
+                )
             await self._sql_session.delete(slide)
             if presentation:
                 presentation.n_slides = 1
@@ -1391,6 +1628,25 @@ class PresentationChatMemoryLayer:
             if text is None:
                 raise ValueError("text is required for text elements.")
             _update_text_element(element, text)
+        elif content_update_requested and element_type == "math":
+            if text is None:
+                raise ValueError("text is required for math elements.")
+            normalized_latex = text.strip()
+            if (
+                normalized_latex.startswith("$$")
+                and normalized_latex.endswith("$$")
+                and len(normalized_latex) > 4
+            ):
+                normalized_latex = normalized_latex[2:-2].strip()
+            elif (
+                normalized_latex.startswith(r"\[")
+                and normalized_latex.endswith(r"\]")
+                and len(normalized_latex) > 4
+            ):
+                normalized_latex = normalized_latex[2:-2].strip()
+            if not normalized_latex:
+                raise ValueError("Math expressions cannot be empty.")
+            element["latex"] = normalized_latex[:4000]
         elif content_update_requested and element_type == "text-list":
             if items is None:
                 raise ValueError("items is required for text-list elements.")
@@ -2026,7 +2282,12 @@ class PresentationChatMemoryLayer:
                     for point in points
                 ]
 
-        if str(element.get("type") or "").lower() in {"text", "text-list", "table"}:
+        if str(element.get("type") or "").lower() in {
+            "text",
+            "math",
+            "text-list",
+            "table",
+        }:
             cls._scale_font_metrics_for_component_resize(element, font_scale)
 
         for key in ("children", "elements"):
@@ -2406,12 +2667,14 @@ class PresentationChatMemoryLayer:
             if node.get("type") == "text":
                 runs = node.get("runs")
                 if isinstance(runs, list) and runs:
-                    joined = "".join(
-                        str(run.get("text") or "")
+                    joined = text_runs_to_tagged_text(runs)
+                    if any(
+                        isinstance(run, dict) and run.get("type") == "latex"
                         for run in runs
-                        if isinstance(run, dict)
-                    )
-                    node["text"] = joined
+                    ):
+                        node.pop("text", None)
+                    else:
+                        node["text"] = joined
                 elif isinstance(node.get("text"), str):
                     node["runs"] = [{"text": node["text"]}]
             elif node.get("type") == "table":
@@ -2468,7 +2731,7 @@ class PresentationChatMemoryLayer:
             )
             alias_text = PresentationChatMemoryLayer._table_cell_alias_text(normalized)
             if normalized_runs and (
-                PresentationChatMemoryLayer._runs_plain_text(normalized_runs)
+                PresentationChatMemoryLayer._runs_content_text(normalized_runs)
                 or not alias_text
             ):
                 normalized["runs"] = normalized_runs
@@ -2494,13 +2757,24 @@ class PresentationChatMemoryLayer:
         for run in runs:
             if isinstance(run, dict):
                 next_run = copy.deepcopy(run)
-                next_run["text"] = PresentationChatMemoryLayer._table_cell_text_value(
-                    next_run.get("text")
-                    if "text" in next_run
-                    else next_run.get("content")
-                    if "content" in next_run
-                    else next_run.get("value")
-                )
+                if next_run.get("type") == "latex":
+                    latex = PresentationChatMemoryLayer._table_cell_text_value(
+                        next_run.get("latex")
+                        if "latex" in next_run
+                        else next_run.get("content")
+                        if "content" in next_run
+                        else next_run.get("value")
+                    )
+                    next_run["latex"] = normalize_latex(latex)
+                    next_run.pop("text", None)
+                else:
+                    next_run["text"] = PresentationChatMemoryLayer._table_cell_text_value(
+                        next_run.get("text")
+                        if "text" in next_run
+                        else next_run.get("content")
+                        if "content" in next_run
+                        else next_run.get("value")
+                    )
                 normalized.append(next_run)
             else:
                 next_run = {
@@ -2512,8 +2786,8 @@ class PresentationChatMemoryLayer:
         return normalized
 
     @staticmethod
-    def _runs_plain_text(runs: list[dict[str, Any]]) -> str:
-        return "".join(str(run.get("text") or "") for run in runs)
+    def _runs_content_text(runs: list[dict[str, Any]]) -> str:
+        return text_runs_to_tagged_text(runs)
 
     @staticmethod
     def _table_cell_alias_text(cell: dict[str, Any]) -> str:
@@ -2536,13 +2810,10 @@ class PresentationChatMemoryLayer:
         if isinstance(value, dict):
             runs = value.get("runs")
             if isinstance(runs, list):
-                text = "".join(
-                    PresentationChatMemoryLayer._table_cell_text_value(run)
-                    for run in runs
-                )
+                text = text_runs_to_tagged_text(runs)
                 if text:
                     return text
-            for key in ("text", "content", "value", "label", "data"):
+            for key in ("text", "latex", "content", "value", "label", "data"):
                 if key in value:
                     return PresentationChatMemoryLayer._table_cell_text_value(value[key])
             return ""
@@ -3501,6 +3772,27 @@ class PresentationChatMemoryLayer:
         if not isinstance(elements, list):
             return
 
+        def apply_repeated_item(
+            element: dict[str, Any],
+            item: Any,
+        ) -> dict[str, Any]:
+            cls._apply_template_element_content(
+                element,
+                item,
+                theme=theme,
+                direct_value=True,
+            )
+            return element
+
+        repeated_groups = hydrate_repeated_top_level_groups(
+            elements,
+            content,
+            apply_item=apply_repeated_item,
+        )
+        if repeated_groups is not None:
+            component["elements"] = repeated_groups
+            return
+
         cls._apply_template_elements_content(
             elements,
             content,
@@ -3691,7 +3983,22 @@ class PresentationChatMemoryLayer:
             if text is None or text == "":
                 return
             cls._set_template_runs_text(element, text)
-            element["text"] = text
+            if any(run.get("type") == "latex" for run in element["runs"]):
+                element.pop("text", None)
+            else:
+                element["text"] = text
+            return
+
+        if element_type == "math":
+            latex = cls._template_text_value(value)
+            if latex is None or not latex.strip():
+                return
+            normalized = latex.strip()
+            if normalized.startswith("$$") and normalized.endswith("$$"):
+                normalized = normalized[2:-2].strip()
+            elif normalized.startswith(r"\[") and normalized.endswith(r"\]"):
+                normalized = normalized[2:-2].strip()
+            element["latex"] = normalized[:4000]
             return
 
         if element_type == "text-list" and isinstance(value, list):
@@ -3792,16 +4099,7 @@ class PresentationChatMemoryLayer:
         text: str,
         fallback_font: Any,
     ) -> list[dict[str, Any]]:
-        if isinstance(existing_runs, list) and existing_runs:
-            first = existing_runs[0]
-            if isinstance(first, dict):
-                run = copy.deepcopy(first)
-                run["text"] = text
-                return [run]
-        run: dict[str, Any] = {"text": text}
-        if isinstance(fallback_font, dict):
-            run["font"] = copy.deepcopy(fallback_font)
-        return [run]
+        return replace_text_runs(existing_runs, text, fallback_font)
 
     @staticmethod
     def _template_asset_url(value: Any) -> str | None:
@@ -4054,6 +4352,12 @@ class PresentationChatMemoryLayer:
 
     @staticmethod
     def _serialize_slide(slide: SlideModel) -> str:
+        if slide.html_content:
+            return (
+                f"slide_index={slide.index}\nlayout_id={slide.layout}\n"
+                f"{PresentationChatMemoryLayer._html_to_text(slide.html_content)}\n"
+                f"{slide.speaker_note or ''}"
+            )
         content_text = ""
         try:
             content_text = json.dumps(slide.content or {}, ensure_ascii=False)
@@ -4062,6 +4366,44 @@ class PresentationChatMemoryLayer:
 
         speaker_note = slide.speaker_note or ""
         return f"slide_index={slide.index}\nlayout_id={slide.layout}\n{content_text}\n{speaker_note}"
+
+    @staticmethod
+    def _html_to_text(html: str) -> str:
+        if not html:
+            return ""
+        without_scripts = re.sub(
+            r"<script\b[^>]*>.*?</script\b[^>]*>",
+            " ",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        without_tags = re.sub(r"<[^>]+>", " ", without_scripts)
+        return " ".join(without_tags.split())
+
+    @staticmethod
+    def _smart_slide_title(html: str, index: int) -> str:
+        title_match = re.search(
+            r"\bdata-slide-title\s*=\s*(?:\"([^\"]*)\"|'([^']*)')",
+            html,
+            flags=re.IGNORECASE,
+        )
+        if title_match:
+            title = (title_match.group(1) or title_match.group(2) or "").strip()
+            if title:
+                return title[:200]
+
+        heading_match = re.search(
+            r"<h[1-6]\b[^>]*>(.*?)</h[1-6]\s*>",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if heading_match:
+            title = PresentationChatMemoryLayer._html_to_text(
+                heading_match.group(1)
+            ).strip()
+            if title:
+                return title[:200]
+        return f"Slide {index + 1}"
 
     @staticmethod
     def _build_snippet(text: str, query_lower: str, window: int = 320) -> str:
