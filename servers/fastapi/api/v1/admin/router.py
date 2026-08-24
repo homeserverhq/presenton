@@ -21,7 +21,11 @@ from api.v1.auth.users import (
 from models.sql.user import User
 from models.sql.key_value import KeyValueSqlModel
 from services.database import get_async_session
-from services.provider_settings import get_provider_settings, save_provider_settings
+from services.provider_settings import (
+    get_provider_settings,
+    redact_provider_settings,
+    save_provider_settings,
+)
 from services.presenton_cloud import get_presenton_provider, has_cloud_credentials
 from utils.get_env import (
     get_app_data_directory_env,
@@ -63,7 +67,7 @@ async def read_provider_settings(
     session: AsyncSession = Depends(get_async_session),
 ) -> dict[str, Any]:
     _ensure_settings_are_mutable()
-    settings = await get_provider_settings(session)
+    settings = redact_provider_settings(await get_provider_settings(session))
     provider = await get_presenton_provider(session, get_presenton_oauth_issuer())
     return {
         **settings,

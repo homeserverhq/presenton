@@ -7,12 +7,11 @@ import { Switch } from '@/components/ui/switch'
 import { LLMConfig } from '@/types/llm_config'
 import OpenAICompatibleImageFields from '@/components/OpenAICompatibleImageFields'
 import { DALLE_3_QUALITY_OPTIONS, GPT_IMAGE_1_5_QUALITY_OPTIONS, IMAGE_PROVIDERS } from '@/utils/providerConstants'
-import { Check, ChevronUp, Eye, EyeOff } from 'lucide-react'
+import { Check, ChevronUp } from 'lucide-react'
 import React, { useEffect, useState } from 'react'
 import { MixpanelEvent, trackEvent } from '@/utils/mixpanel'
 
 const ImageProvider = ({ llmConfig, setLlmConfig }: { llmConfig: LLMConfig, setLlmConfig: (config: any) => void }) => {
-    const [showApiKey, setShowApiKey] = useState(false);
     const [openImageProviderSelect, setOpenImageProviderSelect] = useState(false);
     const [openaiCompatListMeta, setOpenaiCompatListMeta] = useState<{
         modelsChecked: boolean
@@ -318,7 +317,7 @@ const ImageProvider = ({ llmConfig, setLlmConfig }: { llmConfig: LLMConfig, setL
                                                     </label>
                                                     <div className="relative">
                                                         <input
-                                                            type={showApiKey ? 'text' : 'password'}
+                                                            type="password"
                                                             placeholder={`Enter your ${provider.apiKeyFieldLabel}`}
                                                             className="w-full px-4 py-2.5 h-12 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
                                                             value={getFieldValue(provider.apiKeyField)}
@@ -329,13 +328,6 @@ const ImageProvider = ({ llmConfig, setLlmConfig }: { llmConfig: LLMConfig, setL
                                                                 )
                                                             }
                                                         />
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setShowApiKey((prev) => !prev)}
-                                                            className='absolute right-2 top-1/2 -translate-y-1/2 bg-white px-2 py-1 cursor-pointer'
-                                                        >
-                                                            {showApiKey ? <Eye className='w-4 h-4 text-gray-500' /> : <EyeOff className='w-4 h-4 text-gray-500' />}
-                                                        </button>
                                                     </div>
 
                                                 </div>
@@ -355,7 +347,7 @@ const ImageProvider = ({ llmConfig, setLlmConfig }: { llmConfig: LLMConfig, setL
                                     </label>
                                     <div className="relative">
                                         <input
-                                            type={showApiKey ? 'text' : 'password'}
+                                            type="password"
                                             placeholder="API key"
                                             className="w-full px-4 py-2.5 h-12 outline-none border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
                                             value={llmConfig.OPEN_WEBUI_IMAGE_API_KEY || ""}
@@ -363,13 +355,6 @@ const ImageProvider = ({ llmConfig, setLlmConfig }: { llmConfig: LLMConfig, setL
                                                 input_field_changed(e.target.value, "OPEN_WEBUI_IMAGE_API_KEY");
                                             }}
                                         />
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowApiKey((prev) => !prev)}
-                                            className='absolute right-2 top-1/2 -translate-y-1/2 bg-white px-2 py-1 cursor-pointer'
-                                        >
-                                            {showApiKey ? <Eye className='w-4 h-4 text-gray-500' /> : <EyeOff className='w-4 h-4 text-gray-500' />}
-                                        </button>
                                     </div>
                                 </div>
                             )}

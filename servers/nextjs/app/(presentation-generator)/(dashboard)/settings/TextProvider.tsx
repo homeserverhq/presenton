@@ -25,8 +25,6 @@ import { getDefaultOllamaUrl } from "@/utils/providerUtils";
 import {
   Check,
   Loader2,
-  Eye,
-  EyeOff,
   ChevronUp,
   ChevronDown,
 } from "lucide-react";
@@ -60,7 +58,6 @@ const TextProvider = ({ onInputChange, llmConfig }: OpenAIConfigProps) => {
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsChecked, setModelsChecked] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
   const [deepseekAdvancedOpen, setDeepseekAdvancedOpen] = useState(() =>
     !!(llmConfig.DEEPSEEK_BASE_URL || "").trim()
   );
@@ -628,7 +625,7 @@ const TextProvider = ({ onInputChange, llmConfig }: OpenAIConfigProps) => {
                     </label>
                     <div className="relative">
                       <input
-                        type={showApiKey ? "text" : "password"}
+                        type="password"
                         value={currentApiKey}
                         onChange={(e) =>
                           onApiKeyChange(selectedProvider, e.target.value)
@@ -640,17 +637,6 @@ const TextProvider = ({ onInputChange, llmConfig }: OpenAIConfigProps) => {
                             : `Enter your ${providerApiKeyLabel}`
                         }
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKey((prev) => !prev)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 bg-white px-2 py-1 cursor-pointer"
-                      >
-                        {showApiKey ? (
-                          <Eye className="w-4 h-4 text-gray-500" />
-                        ) : (
-                          <EyeOff className="w-4 h-4 text-gray-500" />
-                        )}
-                      </button>
                     </div>
                   </>
                 )}

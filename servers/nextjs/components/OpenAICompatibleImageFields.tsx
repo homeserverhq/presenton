@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronUp, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Check, ChevronUp, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -50,7 +50,6 @@ export default function OpenAICompatibleImageFields({
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsChecked, setModelsChecked] = useState(false);
   const [openModelSelect, setOpenModelSelect] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
   const skipUrlKeyResetOnce = useRef(true);
 
   const urlKey = `${baseUrl}|${apiKey}`;
@@ -124,19 +123,12 @@ export default function OpenAICompatibleImageFields({
             <label className="mb-2 block text-sm font-medium text-gray-700">Image API key</label>
             <div className="relative">
               <input
-                type={showApiKey ? "text" : "password"}
+                type="password"
                 value={apiKey}
                 onChange={(e) => onApiKeyChange(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-2 py-3 outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Key for your image endpoint"
               />
-              <button
-                type="button"
-                onClick={() => setShowApiKey((p) => !p)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer bg-white px-2 py-1"
-              >
-                {showApiKey ? <Eye className="h-4 w-4 text-gray-500" /> : <EyeOff className="h-4 w-4 text-gray-500" />}
-              </button>
             </div>
             <input
               type="text"

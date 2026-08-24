@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState } from "react";
-import { Check, ChevronUp, Eye, EyeOff, Search } from "lucide-react";
+import { Check, ChevronUp, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -37,7 +37,6 @@ const WebSearchProvider = ({
   llmConfig: LLMConfig;
   setLlmConfig: React.Dispatch<React.SetStateAction<LLMConfig>>;
 }) => {
-  const [showApiKey, setShowApiKey] = useState(false);
   const [openProviderSelect, setOpenProviderSelect] = useState(false);
   const isWebSearchEnabled = !!llmConfig.WEB_GROUNDING;
 
@@ -189,8 +188,8 @@ const WebSearchProvider = ({
                     </label>
                     <div className="relative">
                       <input
-                        type={showApiKey ? "text" : "password"}
-                        className="h-12 w-full rounded-lg border border-gray-300 px-4 pr-12 text-sm text-[#191919] outline-none transition-colors focus:border-blue-500"
+                        type="password"
+                        className="h-12 w-full rounded-lg border border-gray-300 px-4 text-sm text-[#191919] outline-none transition-colors focus:border-blue-500"
                         value={getValue(provider.apiKeyField)}
                         onChange={(event) =>
                           update(
@@ -199,17 +198,6 @@ const WebSearchProvider = ({
                           )
                         }
                       />
-                      <button
-                        type="button"
-                        className="absolute right-3 top-1/2 -translate-y-1/2"
-                        onClick={() => setShowApiKey((value) => !value)}
-                      >
-                        {showApiKey ? (
-                          <Eye className="h-4 w-4 text-gray-500" />
-                        ) : (
-                          <EyeOff className="h-4 w-4 text-gray-500" />
-                        )}
-                      </button>
                     </div>
                   </div>
                 )}

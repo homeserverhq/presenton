@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import create_engine, select
@@ -14,6 +15,44 @@ from utils.user_config_store import read_user_config_file, update_user_config_fi
 logger = logging.getLogger(__name__)
 
 PROVIDER_SETTINGS_ID = 1
+
+# Placeholder returned to clients in place of any sensitive field value so the
+# plaintext secret is never exposed, even to admins.
+REDACTED_TEXT = "********"
+
+# Matches field keys that hold secrets (API keys, tokens, credentials, etc.).
+# Excludes *_EXPIRES timestamps (e.g. CODEX_TOKEN_EXPIRES) which are not secrets.
+_SECRET_KEY_RE = re.compile(
+    r"(API_KEY|SECRET|ACCESS_KEY|SESSION_TOKEN|PASSWORD|TOKEN)",
+    re.IGNORECASE,
+)
+
+
+def is_secret_field(key: str) -> bool:
+    """Return True if a config field key holds a sensitive value."""
+    return bool(_SECRET_KEY_RE.search(key)) and not key.upper().endswith("_EXPIRES")
+
+
+def redact_provider_settings(config: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of *config* with every sensitive value replaced by the
+    redaction placeholder. Non-secret and unset fields are left intact."""
+    redacted = dict(config)
+    for key, value in config.items():
+        if is_secret_field(key) and value:
+            redacted[key] = REDACTED_TEXT
+    return redacted
+
+
+def scrub_incoming_secrets(incoming: dict[str, Any]) -> dict[str, Any]:
+    """Remove any incoming field that still holds the redaction placeholder so
+    the stored real secret is preserved on a no-op save. New values overwrite;
+    emptying (falsy) clears the stored value."""
+    return {
+        key: value
+        for key, value in incoming.items()
+        if not (is_secret_field(key) and value == REDACTED_TEXT)
+    }
+
 CODEX_MANAGED_FIELDS = {
     "CODEX_ACCESS_TOKEN",
     "CODEX_REFRESH_TOKEN",
@@ -48,7 +87,7 @@ def merge_provider_settings(
     existing: dict[str, Any], incoming: dict[str, Any]
 ) -> dict[str, Any]:
     """Preserve the previous settings API's patch and managed-token behavior."""
-    sanitized = sanitize_provider_settings(incoming)
+    sanitized = scrub_incoming_secrets(sanitize_provider_settings(incoming))
     merged = {**sanitize_provider_settings(existing), **sanitized}
 
     for key in OAUTH_MANAGED_FIELDS:
